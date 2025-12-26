@@ -9,7 +9,7 @@ from flask import Flask
 from threading import Thread
 
 # ==========================================
-# 第一部分：防斷線機制
+# 第一部分：防斷線機制 (修正 502 錯誤版)
 # ==========================================
 app = Flask('')
 
@@ -18,7 +18,10 @@ def home():
     return "I am alive! Security Bot is running."
 
 def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+    # 【關鍵修改】自動抓取 Render 分配的 Port，如果沒抓到才用 8080
+    # 這樣可以解決 502 Bad Gateway 問題
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run_flask)
@@ -82,8 +85,7 @@ async def on_message(message):
                 # 1. 執行掃描
                 result_text, color_code, need_block = scan_url(word)
                 
-                # 2. 前台處理 (公開頻道)
-                # 如果是危險連結：刪除並警告
+                # 2. 前台處理
                 if need_block:
                     try:
                         await message.delete()
@@ -95,33 +97,32 @@ async def on_message(message):
                         await message.channel.send(warning_msg)
                     except discord.Forbidden:
                         await message.channel.send(f"⚠️ 無權限刪除惡意連結！\n{message.author.mention} 請勿點擊！")
-                
-                # 如果是安全連結：給個勾勾就好，保持版面乾淨
                 else:
                     try:
                         await message.add_reaction("✅")
                     except:
                         pass
 
-                # 3. 後台紀錄 (集中到同一個討論串)
+                # 3. 後台紀錄 (集中 Log)
                 try:
-                    # 決定 Log 要發在哪個頻道 (如果有設定 LOG_CHANNEL_ID 就去那，沒有就在當前頻道)
+                    # 決定 Log 發送頻道
                     if LOG_CHANNEL_ID:
                         log_target_channel = bot.get_channel(int(LOG_CHANNEL_ID))
                     else:
                         log_target_channel = message.channel
 
                     if log_target_channel:
-                        # === 關鍵邏輯：尋找或建立 Log 討論串 ===
+                        # 尋找或建立 Log 討論串
                         log_thread = None
                         
-                        # 先找找看現有的討論串有沒有叫這個名字的
-                        for thread in log_target_channel.threads:
-                            if thread.name == LOG_THREAD_NAME:
-                                log_thread = thread
-                                break
+                        # 先找現有的
+                        if hasattr(log_target_channel, 'threads'):
+                            for thread in log_target_channel.threads:
+                                if thread.name == LOG_THREAD_NAME:
+                                    log_thread = thread
+                                    break
                         
-                        # 如果找不到，就創建一個新的 (設定為公開討論串)
+                        # 找不到就創新
                         if not log_thread:
                             try:
                                 log_thread = await log_target_channel.create_thread(
@@ -130,10 +131,9 @@ async def on_message(message):
                                 )
                             except Exception as e:
                                 print(f"無法建立討論串: {e}")
-                                # 如果無法建立討論串(例如沒權限)，就直接發在頻道
-                                log_thread = log_target_channel
+                                log_thread = log_target_channel # 降級為直接發頻道
 
-                        # 準備報告內容
+                        # 準備報告
                         tw_time = datetime.utcnow() + timedelta(hours=8)
                         embed = discord.Embed(
                             title="📝 連結掃描報告",
@@ -145,7 +145,6 @@ async def on_message(message):
                         embed.add_field(name="📊 結果", value=result_text, inline=False)
                         embed.add_field(name="🔗 連結", value=f"```\n{word}\n```", inline=False)
                         
-                        # 發送到那個集中討論串
                         await log_thread.send(embed=embed)
 
                 except Exception as e:
