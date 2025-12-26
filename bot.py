@@ -1,3 +1,4 @@
+from keep_alive import keep_alive
 import discord
 import requests
 import base64
@@ -91,3 +92,4 @@ if DISCORD_TOKEN is None or VIRUSTOTAL_KEY is None:
     print("【注意】偵測不到雲端金鑰！(若是上傳 Render 請忽略此訊息)")
 else:
     bot.run(DISCORD_TOKEN)
+
